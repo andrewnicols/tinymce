@@ -137,16 +137,18 @@ describe('browser.tinymce.themes.silver.editor.SilverUiOfTomorrowTest', () => {
   };
 
   context('ui_of_tomorrow = false', () => {
-    Arr.each([ 'inline', 'classic' ], (mode) => {
-      const inline = mode === 'inline';
-      context(mode, () => {
+    Arr.each([
+      { name: 'inline', settings: { inline: true }},
+      { name: 'normal', settings: { inline: false }}
+    ], (tester) => {
+      context(tester.name, () => {
         const hook = TinyHooks.bddSetupFromElement<Editor>(
           {
-            inline,
+            ...tester.settings,
             ui_of_tomorrow: false,
             ...sharedSettings,
           },
-          () => setupElement(inline),
+          () => setupElement(tester.settings.inline),
           []
         );
 
@@ -175,16 +177,18 @@ describe('browser.tinymce.themes.silver.editor.SilverUiOfTomorrowTest', () => {
   });
 
   context('ui_of_tomorrow = true', () => {
-    Arr.each([ 'inline', 'classic' ], (mode) => {
-      const inline = mode === 'inline';
-      context(mode, () => {
+    Arr.each([
+      { name: 'inline', settings: { inline: true }},
+      { name: 'normal', settings: { inline: false }}
+    ], (tester) => {
+      context(tester.name, () => {
         const hook = TinyHooks.bddSetupFromElement<Editor>(
           {
-            inline,
+            ...tester.settings,
             ui_of_tomorrow: true,
             ...sharedSettings
           },
-          () => setupElement(true),
+          () => setupElement(tester.settings.inline),
           []
         );
 
