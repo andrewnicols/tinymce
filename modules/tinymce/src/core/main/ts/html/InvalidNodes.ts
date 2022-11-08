@@ -173,4 +173,16 @@ const isInvalid = (schema: Schema, node: AstNode, parent: AstNode | null | undef
   }
 };
 
-export { cleanInvalidNodes, isInvalid };
+const hasInvalidBlockChildren = (schema: Schema, context: string, fragment: AstNode): boolean => {
+  const blockElements = schema.getBlockElements();
+
+  for (let node = fragment.firstChild; node; node = node.walk()) {
+    if (context in blockElements && schema.isValidChild(context, node.name)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+export { cleanInvalidNodes, isInvalid, hasInvalidBlockChildren };

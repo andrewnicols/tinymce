@@ -1,10 +1,11 @@
-import { Arr, Optional, Type } from '@ephox/katamari';
+import { Arr, Obj, Optional, Type } from '@ephox/katamari';
 import { Remove, SugarElement } from '@ephox/sugar';
 
 import DOMUtils from '../api/dom/DOMUtils';
 import Editor from '../api/Editor';
 import { ParserArgs } from '../api/html/DomParser';
 import AstNode from '../api/html/Node';
+import Schema from '../api/html/Schema';
 import HtmlSerializer from '../api/html/Serializer';
 import * as StyleUtils from '../api/html/StyleUtils';
 import Tools from '../api/util/Tools';
@@ -212,17 +213,32 @@ const deleteSelectedContent = (editor: Editor): void => {
   }
 };
 
+// Setting paragraphs in paragraphs with innerHTML or outerHTML will split the outer paragraph leaving an empty paragraph
+// this avoids that empty paragraph by inserting the HTML into a div and letting it split inside that then ignoring the empty
+// text blocks that got created.
+const setOuterHtmlWithoutEmptyBlocks = (schema: Schema, dom: DOMUtils, node: Node, html: string) => {
+  const div = dom.create('div', {}, html);
+  const textBlocks = schema.getTextBlockElements();
+
+  Arr.each(Arr.from(div.childNodes), (child) => {
+    if (!Obj.has(textBlocks, child.nodeName) || child.hasChildNodes()) {
+      node.parentNode?.insertBefore(child, node);
+    }
+  });
+
+  dom.remove(node);
+};
+
 export const insertHtmlAtCaret = (editor: Editor, value: string, details: InsertContentDetails): string => {
   const selection = editor.selection;
   const dom = editor.dom;
 
-  // Setup parser and serializer
-  const parser = editor.parser;
+  const { parser, schema } = editor;
   const merge = details.merge;
 
   const serializer = HtmlSerializer({
     validate: true
-  }, editor.schema);
+  }, schema);
   const bookmarkHtml = '<span id="mce_marker" data-mce-type="bookmark">&#xFEFF;</span>';
 
   // Add caret at end of contents if it's missing
@@ -254,11 +270,21 @@ export const insertHtmlAtCaret = (editor: Editor, value: string, details: Insert
   const parentNode = selection.getNode();
 
   // Parse the fragment within the context of the parent node
-  const parserArgs: ParserArgs = { context: parentNode.nodeName.toLowerCase(), data: details.data, insert: true };
+  const context = parentNode.nodeName.toLowerCase();
+  const parserArgs: ParserArgs = { context, data: details.data, insert: true };
   const fragment = parser.parse(value, parserArgs);
 
+  // Force the transparent element fragment to be invalid if it has invalid block elements within the closest parent block for example `p -> a -> p`
+  const parentBlockContext = dom.getParent(parentNode, (node) =>
+    dom.isBlock(node) && !TransparentElements.isTransparentBlock(schema, node)
+  )?.nodeName.toLowerCase();
+
+  if (parentBlockContext && TransparentElements.isTransparentElementName(schema, context) && InvalidNodes.hasInvalidBlockChildren(schema, parentBlockContext, fragment)) {
+    parserArgs.invalid = true;
+  }
+
   // Custom handling of lists
-  if (details.paste === true && InsertList.isListFragment(editor.schema, fragment) && InsertList.isParentBlockLi(dom, parentNode)) {
+  if (details.paste === true && InsertList.isListFragment(schema, fragment) && InsertList.isParentBlockLi(dom, parentNode)) {
     rng = InsertList.insertAtCaret(serializer, dom, selection.getRng(), fragment);
     if (rng) {
       selection.setRng(rng);
@@ -279,7 +305,7 @@ export const insertHtmlAtCaret = (editor: Editor, value: string, details: Insert
 
     for (node = node.prev; node; node = node.walk(true)) {
       if (node.type === 3 || !dom.isBlock(node.name)) {
-        if (node.parent && editor.schema.isValidChild(node.parent.name, 'span')) {
+        if (node.parent && schema.isValidChild(node.parent.name, 'span')) {
           node.parent.insert(marker, node, node.name === 'br');
         }
         break;
@@ -328,8 +354,8 @@ export const insertHtmlAtCaret = (editor: Editor, value: string, details: Insert
     const toExtract = fragment.children();
     const parent = fragment.parent ?? root;
     fragment.unwrap();
-    const invalidChildren = Arr.filter(toExtract, (node) => InvalidNodes.isInvalid(editor.schema, node, parent));
-    InvalidNodes.cleanInvalidNodes(invalidChildren, editor.schema);
+    const invalidChildren = Arr.filter(toExtract, (node) => InvalidNodes.isInvalid(schema, node, parent));
+    InvalidNodes.cleanInvalidNodes(invalidChildren, schema);
     FilterNode.filter(parser.getNodeFilters(), parser.getAttributeFilters(), root);
     value = serializer.serialize(root);
 
@@ -337,7 +363,7 @@ export const insertHtmlAtCaret = (editor: Editor, value: string, details: Insert
     if (parentNode === rootNode) {
       dom.setHTML(rootNode, value);
     } else {
-      dom.setOuterHTML(parentNode, value);
+      setOuterHtmlWithoutEmptyBlocks(schema, dom, parentNode, value);
     }
   }
 
@@ -345,7 +371,7 @@ export const insertHtmlAtCaret = (editor: Editor, value: string, details: Insert
   moveSelectionToMarker(editor, dom.get('mce_marker'));
   unmarkFragmentElements(editor.getBody());
   trimBrsFromTableCell(dom, selection.getStart());
-  TransparentElements.updateCaret(editor.schema, editor.getBody(), selection.getStart());
+  TransparentElements.updateCaret(schema, editor.getBody(), selection.getStart());
 
   return value;
 };
